@@ -122,69 +122,124 @@ flowchart TD
         DRV --> RX["Rx BD : 수신 방향 정합"]
     end
 
-    subgraph S2["② LIDAR-Lite v3 거리 측정"]
-        L1["조향된 방향으로<br/>레이저 송신"] --> L2["물체 반사광 수신"]
-        L2 --> L3{"반사 신호가<br/>검출 임계값 초과?"}
-        L3 -->|"예"| L4["거리값 출력"]
-        L3 -->|"아니오"| L5["유효 신호 없음"]
-    end
+| 차량 상태 | 판단 기준 | 동작 |
+| :--- | :--- | :--- |
+| 주행 | 거리 50 cm 이상 | 주행 유지 |
+| 장애물 접근 | 주행 중 거리 50 cm 미만 | 정지 |
+| 정지 유지 | 정지 중 거리 70 cm 미만 | 정지 유지 |
+| 재출발 | 정지 중 거리 70 cm 이상 | 주행 재개 |
+| 측정 오류 | 0 또는 이상값 | 한 번은 무시, 이어지면 정지 유지, 정해진 횟수를 넘으면 Arduino 재시작 |
 
-    subgraph S3["③ Arduino 거리 처리"]
-        P1["I²C로 거리 취득"] --> P2["필터로 변동 감소"]
-        P2 --> P3{"유효한 측정값?"}
-        P3 -->|"아니오"| P4["제어 판단에서 제외<br/>직전 상태 유지"]
-    end
+**3-4. Unity 가상 주행 환경**
 
-    subgraph S4["④ 차량 제어"]
-        E{"현재 차량 상태"}
-        F{"70 cm 이내?"}
-        G{"90 cm 이상?"}
-        H["모터 정지"]
-        I["모터 구동"]
-        E -->|"주행 중"| F
-        E -->|"정지 중"| G
-        F -->|"예"| H
-        F -->|"아니오"| I
-        G -->|"예"| I
-        G -->|"아니오"| H
-    end
+<p align="center">
+  <img src="images/unity_hud.jpg" width="420" alt="Unity 가상 LiDAR 감지와 HUD 경고 화면">
+</p>
+<p align="center"><sub>Unity 안의 가상 LiDAR(Ray)가 보행자를 감지하면 로그가 '감지됨'으로 바뀌고 윈드실드 HUD에 경고가 표시된다. 실물 LiDAR 데이터와는 아직 연결하지 않았다.</sub></p>
 
-    subgraph S5["단독 동작 기능"]
-        CAM["카메라 영상"] --> YOLO["YOLO 객체 인식"]
-        VL["Unity 가상 LiDAR"] --> HUD["HUD 경고 표시"]
-    end
+---
 
-    TX --> L1
-    RX --> L2
-    L4 --> P1
-    L5 --> P1
-    P3 -->|"예"| E
-    H --> MD["모터 드라이버 → DC 모터"]
-    I --> MD
-    P1 -.->|"실험 데이터"| MAT["MATLAB<br/>데이터 정리와 비교"]
-    YOLO -.->|"후속 연동"| E
-    P2 -.->|"후속 연동"| VL
+## 💡4. 작품 소개영상
 
-    classDef process fill:#EEEAFE,stroke:#9981D8,color:#222;
-    classDef decision fill:#FFF3D6,stroke:#D8AE55,color:#222;
-    classDef stop fill:#FCE8E6,stroke:#D98A82,color:#222;
-    classDef drive fill:#E6F4EA,stroke:#7BAD8A,color:#222;
-    classDef ext fill:#F4F4F4,stroke:#9A9A9A,stroke-dasharray:4 3,color:#222;
+- **시연 내용** : BD-LiDAR 장애물 감지, RC 차량 자동 정지와 안전거리 확보 후 재출발
 
-    class PC,DRV,TX,RX,L1,L2,L4,L5,P1,P2,P4,MD process;
-    class L3,P3,E,F,G decision;
-    class H stop;
-    class I drive;
-    class CAM,YOLO,VL,HUD,MAT ext;
+<!-- 아래 두 곳의 영상ID를 유튜브 주소 youtu.be/ 뒤의 값으로 바꿀 것 -->
+[![BD-LiDAR 사각지대 탐지 시연 영상](https://img.youtube.com/vi/영상ID/hqdefault.jpg)](https://youtu.be/영상ID)
 
-    style S1 fill:#F7F5FF,stroke:#C2B4E2
-    style S2 fill:#F3F7FC,stroke:#A9BED8
-    style S3 fill:#F3F9F4,stroke:#A9CDB2
-    style S4 fill:#FFFEED,stroke:#D5CD93
-    style S5 fill:#FAFAFA,stroke:#BDBDBD,stroke-dasharray:4 3
+---
+
+## 💡5. 핵심 소스코드
+
+**5-1. LiDAR 거리 측정**
+
+- **소스코드 설명** : LiDAR-Lite v3를 I2C로 트리거하고, busyflag가 풀리면 2byte 거리값(cm)을 읽는다.
+
+```cpp
+int distanceFast(bool biasCorrection)
+{
+  Wire.beginTransmission(LIDARLITE_ADDR_DEFAULT);
+  Wire.write(0x00);
+  Wire.write(biasCorrection ? 0x04 : 0x03);
+  if (Wire.endTransmission() != 0) return -1;
+  while (true)
+  {
+    Wire.beginTransmission(LIDARLITE_ADDR_DEFAULT);
+    Wire.write(0x01);
+    if (Wire.endTransmission() != 0) return -1;
+
+    if (Wire.requestFrom((uint8_t)LIDARLITE_ADDR_DEFAULT, (uint8_t)1) >= 1)
+    {
+      if ((Wire.read() & 0x01) == 0) break;   // not busy
+    }
+
+    if (millis() - startMs > 50) return -1;   // timeout
+  }
+  Wire.beginTransmission(LIDARLITE_ADDR_DEFAULT);
+  Wire.write(0x8f);
+  if (Wire.endTransmission() != 0) return -1;
+  if (Wire.requestFrom((uint8_t)LIDARLITE_ADDR_DEFAULT, (uint8_t)2) < 2) return -1;
+  int d = Wire.read();
+  d <<= 8;
+  d |= Wire.read();
+  return d;
+}
 ```
 
-- **정지와 재출발 기준을 나눈 이유** : 기준이 하나뿐이면 정지 직후 측정값이 잡음과 진동 때문에 기준 위아래를 오가며 정지와 출발이 번갈아 실행된다. 재출발 기준을 90 cm로 두면 측정값이 70 cm와 90 cm 사이에서 흔들리는 동안 직전 상태가 유지된다.
+**5-2. 노이즈 필터링**
+
+- **소스코드 설명** : 5~4000cm 밖의 값은 버리고 최근 5개 값의 이동평균을 내며, 5회 연속 실패하면 -1을 반환한다.
+
+```cpp
+#define FILTER_SIZE 5
+#define MIN_VALID_CM 5
+#define MAX_VALID_CM 4000
+#define MAX_CONSECUTIVE_FAILS 5  
+int readFilteredDistance(bool biasCorrection)
+{
+  int raw = distanceFast(biasCorrection);
+  if (raw < MIN_VALID_CM || raw > MAX_VALID_CM)
+  {
+    failCount++;
+    if (failCount >= MAX_CONSECUTIVE_FAILS) {
+      return -1;
+    }
+    return lastGoodDistance;
+  }
+  failCount = 0;
+  lastGoodDistance = raw;
+  distBuffer[distBufferIndex] = raw;
+  distBufferIndex = (distBufferIndex + 1) % FILTER_SIZE;
+  if (distBufferIndex == 0) bufferFilled = true;
+  int count = bufferFilled ? FILTER_SIZE : distBufferIndex;
+  if (count == 0) return raw;
+  long sum = 0;
+  for (int i = 0; i < count; i++) sum += distBuffer[i];
+  return (int)(sum / count);
+}
+```
+
+
+
+# BD-LiDAR 융합 기반 자율주행차량 사각지대 해소 및 능동형 AI 객체인식 시스템 개발
+
+---
+
+## 💡1. 프로젝트 개요
+
+**1-1. 프로젝트 소개**
+
+- 프로젝트 명 : BD-LiDAR 융합 기반 자율주행차량 사각지대 해소 및 능동형 AI 객체인식 시스템 개발
+- 프로젝트 정의 : 액정 Beam Deflector(BD)를 LiDAR의 송신부와 수신부에 적용하여 탐지 방향을 전기적으로 조절하고, 측정한 거리 정보를 차량 제어에 활용하는 시스템
+- 개발 목표 : 기계적 회전 없이 단일 LiDAR의 탐지 범위를 확장하고, RC 차량의 장애물 감지 및 정지 동작으로 적용 가능성 검증
+
+**1-2. 개발 배경 및 필요성**
+
+- 자율주행의 안전성을 높이기 위해서는 주변 객체의 종류뿐 아니라 정확한 거리 정보가 필요합니다. LiDAR는 빛의 왕복 시간을 이용해 거리를 측정하여 카메라 기반 인지를 보완할 수 있습니다.
+- 넓은 영역을 측정하는 LiDAR는 비용, 크기 및 차량 탑재 구조를 함께 고려해야 하며, 기계식 회전 방식은 구동부 마모와 유지보수 부담이 발생할 수 있습니다.
+- 비교적 간결한 single-point LiDAR는 탐지 방향이 제한됩니다. 이를 여러 대 배치하면 센서 수와 배선 및 보정 부담이 증가합니다.
+- 본 프로젝트에서는 기존 LiDAR 앞에 BD를 결합하여, 센서를 회전시키지 않고 탐지 방향을 바꾸는 방식으로 이러한 제약을 보완하고자 했습니다.
+
+**1-3. 프로젝트 특장점**
 
 **3-4. 개발 과정 및 문제 해결**
 
@@ -242,25 +297,191 @@ YOLO 객체 인식과 Unity 시각화는 각각 단독으로 동작한다. 후�
 
 **5-2. 거리값 필터링 및 예외 처리**
 
-- **소스코드 설명** : 거리값의 변동을 줄이고 유효하지 않은 측정값을 구분하는 코드. 필터 처리와 오류 발생 시 처리 방식을 제시한다.
+- 소스코드 설명 : LiDAR-Lite v3를 I2C로 트리거하고, busyflag가 풀리면 2byte 거리값(cm)을 읽는다.
+
+```cpp
+int distanceFast(bool biasCorrection)
+{
+  Wire.beginTransmission(LIDARLITE_ADDR_DEFAULT);
+  Wire.write(0x00);
+  Wire.write(biasCorrection ? 0x04 : 0x03);
+  if (Wire.endTransmission() != 0) return -1;
+  while (true)
+  {
+    Wire.beginTransmission(LIDARLITE_ADDR_DEFAULT);
+    Wire.write(0x01);
+    if (Wire.endTransmission() != 0) return -1;
+
+    if (Wire.requestFrom((uint8_t)LIDARLITE_ADDR_DEFAULT, (uint8_t)1) >= 1)
+    {
+      if ((Wire.read() & 0x01) == 0) break;   // not busy
+    }
+
+    if (millis() - startMs > 50) return -1;   // timeout
+  }
+  Wire.beginTransmission(LIDARLITE_ADDR_DEFAULT);
+  Wire.write(0x8f);
+  if (Wire.endTransmission() != 0) return -1;
+  if (Wire.requestFrom((uint8_t)LIDARLITE_ADDR_DEFAULT, (uint8_t)2) < 2) return -1;
+  int d = Wire.read();
+  d <<= 8;
+  d |= Wire.read();
+  return d;
+}
+```
+
+**5-2. 노이즈 필터**
+
+- 소스코드 설명 : 5~4000cm 밖의 값은 버리고 최근 5개 값의 이동평균을 내며, 5회 연속 실패하면 -1을 반환한다.
+
+```cpp
+#define FILTER_SIZE 5
+#define MIN_VALID_CM 5
+#define MAX_VALID_CM 4000
+#define MAX_CONSECUTIVE_FAILS 5   
+int readFilteredDistance(bool biasCorrection)
+{
+  int raw = distanceFast(biasCorrection);
+  if (raw < MIN_VALID_CM || raw > MAX_VALID_CM)
+  {
+    failCount++;
+    // Tolerate a few isolated glitches, but report failure if it persists
+    // so the car does not keep driving on stale data.
+    if (failCount >= MAX_CONSECUTIVE_FAILS) {
+      return -1;
+    }
+    return lastGoodDistance;
+  }
+  failCount = 0;
+  lastGoodDistance = raw;
+  distBuffer[distBufferIndex] = raw;
+  distBufferIndex = (distBufferIndex + 1) % FILTER_SIZE;
+  if (distBufferIndex == 0) bufferFilled = true;
+  int count = bufferFilled ? FILTER_SIZE : distBufferIndex;
+  if (count == 0) return raw;
+  long sum = 0;
+  for (int i = 0; i < count; i++) sum += distBuffer[i];
+  return (int)(sum / count);
+}
+```
 
 ```cpp
 // 거리값 필터링 및 예외 처리 코드
 ```
 
-**5-3. 차량 정지 및 재출발 제어**
+**5-3. 자동 정지/재출**
 
-- **소스코드 설명** : 현재 차량 상태와 측정 거리를 비교해 모터를 제어하는 코드. 70 cm 정지 기준과 90 cm 재출발 기준을 구분한 상태 전환 로직을 제시한다.
+- 소스코드 설명 : 70cm 미만이면 정지하고 90cm 이상이면 다시 출발한다. 두 기준값의 간격(히스테리시스)으로 정지와 출발이 떨리는 걸 막는다.
 
 ```cpp
-// 차량 정지 및 재출발 제어 코드
+const int THRESHOLD = 70;        
+const int START_THRESHOLD = 90;   
+if (distance > 0 && distance < THRESHOLD && isDriving) {
+  stopMotor();
+}
+else if (distance >= START_THRESHOLD && !isDriving && !isBraking) {
+  goForward();
+}
 ```
 
-**5-4. 외부 기술 활용 및 자체 구현 범위**
+**5-4. 페일세이프 및 단락 브레이크**
 
-| 구분 | 활용 및 구현 범위 |
-| :--- | :--- |
-| **제공 장치** | 액정 BD 및 구동 장치를 활용한 조향 실험 |
-| **상용 하드웨어** | LiDAR, Arduino 및 모터 드라이버 활용 |
-| **외부 소프트웨어** | LiDAR 라이브러리, YOLO 및 Unity 활용 |
-| **자체 구현** | 송수신 BD 배치와 정렬, 실험 설계 및 분석,<br>거리 처리와 차량 제어 로직, 시각화 구성 |
+- 소스코드 설명 : 주행 중 유효한 측정값이 없으면 즉시 브레이크를 건다. 정지할 때 모터를 단락 제동하고, 400ms 유지한 뒤 드라이버를 끈다.
+
+```cpp
+if (distance < 0 && isDriving) {
+  stopMotor();
+}
+const uint32_t BRAKE_HOLD_MS = 400;
+void stopMotor() {
+  enableDriver();
+  digitalWrite(AIN1, HIGH);
+  digitalWrite(AIN2, HIGH);
+  analogWrite(PWMA, 255);
+  setSteerMotor(0);
+  isDriving = false;
+  isBraking = true;
+  brakeStartMs = millis();
+}
+void releaseBrake() {
+  analogWrite(PWMA, 0);
+  digitalWrite(AIN1, LOW);
+  digitalWrite(AIN2, LOW);
+  setSteerMotor(0);
+  disableDriver();
+  isBraking = false;
+}
+if (isBraking && (now - brakeStartMs >= BRAKE_HOLD_MS)) {
+  releaseBrake();
+}
+```
+
+**5-5. 조향 트림 보정**
+
+- 소스코드 설명 : a/d(±5), q/e(±1), 0(해제)으로 직진 편향을 보정하고, 주행 중이면 바로 반영된다.
+
+```cpp
+int steerTrim = 105;
+const int STEER_TRIM_STEP = 5;
+const int STEER_TRIM_FINE = 1;
+const int STEER_TRIM_MAX = 200;
+void adjustTrim(int delta) {
+  steerTrim += delta;
+  if (steerTrim > STEER_TRIM_MAX)  steerTrim = STEER_TRIM_MAX;
+  if (steerTrim < -STEER_TRIM_MAX) steerTrim = -STEER_TRIM_MAX;
+  if (isDriving) {
+    setSteerMotor(steerTrim);
+  }
+  printTrim();
+}
+if (cmd == 'a') adjustTrim(+STEER_TRIM_STEP);
+if (cmd == 'd') adjustTrim(-STEER_TRIM_STEP);
+if (cmd == 'q') adjustTrim(+STEER_TRIM_FINE);
+if (cmd == 'e') adjustTrim(-STEER_TRIM_FINE);
+if (cmd == '0') {
+  steerTrim = 0;
+  setSteerMotor(0);
+  printTrim();
+}
+```
+
+**5-6. 시리얼 모터 제어**
+
+- 소스코드 설명 : Space로 자동주행을 켜고 s로 정지한다. 정지 상태에서도 LiDAR는 계속 동작한다.
+
+```cpp
+bool motorControlEnabled = false;
+while (Serial.available() > 0) {
+  char cmd = Serial.read();
+  if (cmd == ' ') {
+    motorControlEnabled = true;
+    Serial.println("MOTOR CONTROL ON");
+  }
+  if (cmd == 's') {
+    motorControlEnabled = false;
+    if (!isBraking) {
+      stopMotor();
+    }
+    Serial.println("MOTOR STOP - LiDAR still running");
+  }
+}
+```
+
+**5-7. 거리 시리얼 출력**
+
+- 소스코드 설명 : 모터 상태와 관계없이 50ms마다 현재 거리를 출력하고, 측정이 실패하면 에러 메시지를 출력한다.
+
+```cpp
+static const uint32_t PRINT_PERIOD_MS = 50;
+distance = readFilteredDistance(true);
+uint32_t now = millis();
+static uint32_t lastPrint = 0;
+if (now - lastPrint >= PRINT_PERIOD_MS) {
+  lastPrint = now;
+  if (distance >= 0) {
+    Serial.println(distance);
+  } else {
+    Serial.println("Error: -1 (LiDAR read failed)");
+  }
+}
+```
