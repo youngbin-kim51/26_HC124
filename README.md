@@ -102,7 +102,7 @@ BD-LiDAR 융합 기반 자율주행차량 사각지대 해소 및 능동형 AI �
 **3-1. 하드웨어 구성**
 
 <p align="center">
-  <img width="1429" height="886" alt="Image" src="https://github.com/user-attachments/assets/6d598639-5bf3-4c57-845b-ebca52959924" />
+  <img width="1019" height="631" alt="Image" src="https://github.com/user-attachments/assets/f6461d4c-2244-4c54-b60c-7d08a25cc884" />
 </p>
 
 **3-2. 제작한 RC 차량**
