@@ -228,8 +228,7 @@ YOLO 객체 인식과 Unity 시각화는 각각 단독으로 동작한다. 후�
 
 - **시연 내용** : BD-LiDAR 장애물 감지, RC 차량 자동 정지와 안전거리 확보 후 재출발
 
-<!-- 아래 두 곳의 영상ID를 유튜브 주소 youtu.be/ 뒤의 값으로 바꿀 것 -->
-[![BD-LiDAR 사각지대 탐지 시연 영상](https://img.youtube.com/vi/영상ID/hqdefault.jpg)](https://youtu.be/영상ID)
+https://www.youtube.com/watch?v=qh-QOeuo1m0&feature=youtu.be
 
 ---
 
