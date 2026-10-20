@@ -14,7 +14,7 @@ BD-LiDAR 융합 기반 자율주행차량 사각지대 해소 및 능동형 AI �
 - **구현 결과** : BD 구성에 따라 **검출 각도 2° → 12° → 20° 확장**, LIDAR-Lite v3 기반 RC 차량의 **장애물 감지와 정지 및 재출발 구현**
 - **확장 방향** : YOLO 객체 인식과 Unity 시각화를 LiDAR 거리와 결합한 능동형 인지
 
-<img width="1500" height="829" alt="Image" src="https://github.com/user-attachments/assets/7f0f99b4-0a0d-42ed-9d4c-b4eb831cd1de" />
+<img width="1408" height="757" alt="Image" src="https://github.com/user-attachments/assets/fa545e6b-30a0-48f9-b22b-78d425a93d93" />
 
 </p>
 <p align="center"><sub>LiDAR만 쓸 때와 BD를 붙였을 때의 검출 범위 비교 개념도</sub></p>
